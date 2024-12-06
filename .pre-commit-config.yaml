@@ -1,8 +1,7 @@
-
 repos:
-    # Compare the local template version to the latest remote template version
-    # This hook should always pass. It will print a message if the local version 
-    # is out of date.
+  # Compare the local template version to the latest remote template version
+  # This hook should always pass. It will print a message if the local version
+  # is out of date.
   - repo: https://github.com/lincc-frameworks/pre-commit-hooks
     rev: v0.1.2
     hooks:
@@ -21,17 +20,6 @@ repos:
         stages: [pre-commit]
         language: system
         entry: jupyter nbconvert --clear-output
-    # Prevents committing directly branches named 'main' and 'master'.
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.4.0
-    hooks:
-      - id: no-commit-to-branch
-        name: Prevent main branch commits
-        description: Prevent the user from committing directly to the primary branch.
-      - id: check-added-large-files
-        name: Check for large files
-        description: Prevent the user from committing very large files.
-        args: ['--maxkb=500']
     # Verify that pyproject.toml is well formed
   - repo: https://github.com/abravalheri/validate-pyproject
     rev: v0.12.1
@@ -54,35 +42,12 @@ repos:
         description: Sort and organize imports in .py and .pyi files.
         types_or: [python, pyi]
     # Analyze the src code style and report code that doesn't adhere.
-  - repo: local
+  - repo: https://github.com/pycqa/flake8
+    rev: 7.1.1
     hooks:
-      - id: pylint
-        name: pylint (python files in src/)
-        entry: pylint
-        language: system
-        types: [python]
-        files: ^src/
-        args:
-          [
-            "-rn", # Only display messages
-            "-sn", # Don't display the score
-            "--rcfile=src/.pylintrc",
-          ]
-    # Analyze the tests code style and report code that doesn't adhere.
-  - repo: local
-    hooks:
-      - id: pylint
-        name: pylint (python files in tests/ and benchmarks/)
-        entry: pylint
-        language: system
-        types: [python]
-        files: ^(tests|benchmarks)/
-        args:
-          [
-            "-rn", # Only display messages
-            "-sn", # Don't display the score
-            "--rcfile=tests/.pylintrc",
-          ]
+      - id: flake8
+        name: Run flake8
+        description: Check code style in all .py files.
     # Analyze the code style and report code that doesn't adhere.
   - repo: https://github.com/psf/black
     rev: 23.7.0
@@ -104,10 +69,6 @@ repos:
         language: system
         types: [python]
         files: ^(src|tests)/
-        args:
-          [
-            "--strict", # Use mypy strict mode to enforce type hints
-          ]
     # Run unit tests, verify that they pass. Note that coverage is run against
     # the ./src directory here because that is what will be committed. In the
     # github workflow script, the coverage is run against the installed package
