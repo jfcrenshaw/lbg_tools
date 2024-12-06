@@ -17,3 +17,11 @@ def test_cant_set_properties() -> None:
         tbin.mag_cut = -99  # type: ignore
     with pytest.raises(AttributeError):
         tbin.m5_det = -99  # type: ignore
+
+
+def test_properties() -> None:
+    """Test that bin properties run successfully"""
+    tbin = TomographicBin(data.bands[0], 26)
+    tbin.nz
+    tbin.number_density
+    tbin.pz

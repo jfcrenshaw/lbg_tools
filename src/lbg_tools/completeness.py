@@ -59,7 +59,7 @@ class Completeness:
 
         # Create interpolators
         self._interpolator = RegularGridInterpolator(
-            (self.table.index, self.table.columns),
+            (self.table.index.to_numpy(), self.table.columns.to_numpy()),
             self.table.values,
             method="linear",
             bounds_error=False,

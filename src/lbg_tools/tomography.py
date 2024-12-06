@@ -76,7 +76,7 @@ class TomographicBin:
         m = np.linspace(20, self.mag_cut, 101)
 
         # Get redshift grid from completeness table
-        z = self.completeness.table.index[..., None]
+        z = self.completeness.table.index.to_numpy()[..., None]
 
         # Convert apparent to absolute magnitude
         DL = cosmo.luminosity_distance(z).to(u.pc).value  # Lum. Dist. in pc
@@ -109,7 +109,7 @@ class TomographicBin:
         z, nz = self.nz
 
         # Integrate over redshift bins
-        n = simpson(nz, x=z)
+        n = simpson(nz, x=z, axis=-1)
 
         return n
 
@@ -128,7 +128,7 @@ class TomographicBin:
         z, nz = self.nz
 
         # Integrate over redshift bins
-        n = simpson(nz, x=z)
+        n = np.atleast_1d(simpson(nz, x=z, axis=-1))
 
         # Normalize redshift distribution
         pz = nz / n[:, None]
