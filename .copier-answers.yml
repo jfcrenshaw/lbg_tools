@@ -1,0 +1,23 @@
+# Changes here will be overwritten by Copier
+_commit: v2.0.4
+_src_path: gh:lincc-frameworks/python-project-template
+author_email: jfcrenshaw@gmail.com
+author_name: John Franklin Crenshaw
+create_example_module: true
+custom_install: true
+enforce_style:
+- pylint
+- black
+- isort
+failure_notification: []
+include_benchmarks: false
+include_docs: false
+mypy_type_checking: strict
+package_name: lbg_tools
+project_license: MIT
+project_name: lbg_tools
+project_organization: jfcrenshaw
+python_versions:
+- '3.11'
+- '3.12'
+- '3.13'
