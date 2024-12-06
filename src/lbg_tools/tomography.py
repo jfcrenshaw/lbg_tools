@@ -34,8 +34,6 @@ class TomographicBin:
         # Set m5_det
         m5_det = mag_cut if m5_det is None else m5_det
 
-        print(mag_cut, m5_det)
-
         # Save params
         self._band = band
         self._mag_cut = mag_cut
