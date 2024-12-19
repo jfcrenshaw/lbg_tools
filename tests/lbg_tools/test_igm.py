@@ -27,10 +27,10 @@ def test_limits() -> None:
         igm = IGM(model)
         for z in np.arange(3, 7, 0.5):
             # No transmission at very low wavelengths
-            assert igm.transmission(0.0, z) < 0.1
+            assert igm.transmission(0.0, z) < 0.1  # type: ignore
 
             # Full transmission at very high wavelengths
-            assert np.isclose(igm.transmission(1e9, z), 1)
+            assert np.isclose(igm.transmission(1e9, z), 1)  # type: ignore
 
 
 def test_decrease_with_redshift() -> None:
@@ -42,7 +42,7 @@ def test_decrease_with_redshift() -> None:
         # Calculate transmission at different redshifts
         trans = []
         for z in np.arange(3, 7, 0.5):
-            trans.append(igm.transmission(wavelen, z))
+            trans.append(igm.transmission(wavelen, z))  # type: ignore
 
         # Make sure they are decreasing
         diffs = np.diff(trans, axis=0)
