@@ -8,6 +8,8 @@ from .library import library
 
 
 class Completeness:
+    """Completeness function object."""
+
     def __init__(
         self,
         band: str,
