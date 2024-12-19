@@ -181,8 +181,9 @@ class LuminosityFunction:
         """
         # Calculate raw LF
         dM = M - self.M_star(z)
-        den = 10 ** (0.4 * self.alpha(z) * dM) + 10 ** (0.4 * self.beta(z) * dM)
-        lf0 = self.phi_star(z) / den
+        den1 = 10 ** (0.4 * (self.alpha(z) + 1) * dM)
+        den2 = 10 ** (0.4 * (self.beta(z) + 1) * dM)
+        lf0 = self.phi_star(z) / (den1 + den2)
 
         return np.atleast_1d(lf0).squeeze()
 
