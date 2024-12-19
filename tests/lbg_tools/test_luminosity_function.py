@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from lbg_tools import Completeness, LuminosityFunction, data
+from lbg_tools import Completeness, LuminosityFunction, library
 
 
 def test_broadcasting() -> None:
@@ -26,7 +26,7 @@ def test_completeness() -> None:
     assert np.allclose(obs0, obs1)
 
     # Apply completeness and check that values are smaller
-    lf *= Completeness(data.bands[0], 26.0)
+    lf *= Completeness(library.get_bands()[0], 26.0)
     true = lf.true(M, z)
     obs = lf(M, z)
     assert not np.allclose(true, obs)

@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 from scipy.interpolate import RegularGridInterpolator
 
-from .utils import data
+from .library import library
 
 
 class Completeness:
@@ -27,28 +27,33 @@ class Completeness:
         self._m5_det = m5_det
 
         # Load the completeness table
-        file_found = False
-        for directory in data.directories:
-            file = directory / f"completeness_{band}.dat"
-            if file.exists():
-                self.table0 = pd.read_csv(
-                    file,
-                    sep="  ",
-                    header=5,
-                    engine="python",
-                    dtype=np.float64,
-                )
-                self.table0.index = self.table0.index.to_numpy(dtype=float)
-                self.table0.columns = self.table0.columns.to_numpy(dtype=float)
-                file_found = True
-                break
-        if not file_found:
+        files = []
+        for directory in library.directories:
+            files.extend(list(directory.glob(f"**/completeness_{band}.dat")))
+        if len(files) == 0:
             raise ValueError(
                 f"completeness_{band}.dat not found in any data directory.\n"
                 "Perhaps you need to run `from lbg_tools import data` and "
-                "`data.add_directory('path/to/files')` before creating the "
+                "`library.add_directory('path/to/files')` before creating the "
                 "completeness object."
             )
+        if len(files) > 1:
+            raise RuntimeError(
+                f"Found {len(files)} files with the name 'completeness_{band}.dat' "
+                "in the data directories, and I don't know which one to pick! "
+                "You must remove all but one of these files, or use unique "
+                "band names."
+            )
+        else:
+            self.table0 = pd.read_csv(
+                files[0],
+                sep="  ",
+                header=5,
+                engine="python",
+                dtype=np.float64,
+            )
+            self.table0.index = self.table0.index.to_numpy(dtype=float)
+            self.table0.columns = self.table0.columns.to_numpy(dtype=float)
 
         # Force completeness to be monotonic along magnitude axis
         # and unimodal along the redshift axis. This ensures extrapolation
