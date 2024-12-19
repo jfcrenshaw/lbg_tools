@@ -67,6 +67,14 @@ class Bandpass:
         return self._throughput
 
     @property
+    def fwhm(self) -> float:
+        """Bandpass full-width-at-half-max, in angstroms."""
+        w, t = self.wavelen, self.throughput
+        w_left = w[np.argmax(t > 0.5 * t.max())]
+        w_right = w[-np.argmax(t[::-1] > 0.5 * t.max())]
+        return w_right - w_left
+
+    @property
     def mean_wavelength(self) -> float:
         """Photon-weighted mean wavelength of the bandpass, in angstroms"""
         num = simpson(self.wavelen**2 * self.throughput, x=self.wavelen)
