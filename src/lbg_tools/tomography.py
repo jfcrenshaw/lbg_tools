@@ -242,6 +242,8 @@ class TomographicBin:
             band=self.band,
             mag_cut=self.mag_cut + dm,
             m5_det=self.m5_det + dm,
+            dz=self.dz,
+            f_interlopers=self.f_interlopers,
             lf_params=self._lf_params,
         )
 

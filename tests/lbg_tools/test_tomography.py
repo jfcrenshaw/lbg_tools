@@ -77,3 +77,12 @@ def test_min_redshift_zero() -> None:
         tbin = TomographicBin(band, 26, f_interlopers=0.2)
         z, _ = tbin.pz
         assert z.min() >= 0
+
+
+def test_reasonable_mag_bias() -> None:
+    """Test that the mag bias is reasonable."""
+    u0 = TomographicBin("u", 24.5, 24.5, f_interlopers=0)
+    assert np.isclose(u0.mag_bias, 2.7, atol=0.1)
+
+    u0 = TomographicBin("u", 24.5, 24.5, f_interlopers=0.1)
+    assert np.isclose(u0.mag_bias, 2.7, atol=0.1)
