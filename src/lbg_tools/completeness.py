@@ -14,6 +14,9 @@ class Completeness:
         self,
         band: str,
         m5_det: float,
+        allow_extrap: bool = True,
+        extrap_bright: bool = True,
+        validate_deep: bool = True,
     ) -> None:
         """Create completeness function.
 
@@ -23,10 +26,22 @@ class Completeness:
             Name of dropout band
         m5_det : float
             5-sigma limiting depth in the detection band
+        allow_extrap : bool, optional
+            Whether to allow extrapolation. If False, a ValueError is raised
+            for values outside of the domain of the completeness table.
+            Default is True.
+        extrap_bright : bool, optional
+            Whether to linearly extrapolate on the bright end. If False,
+            completeness at the bright end is flat. Default is True.
+        validate_deep : bool, optional
+            Whether to perform quick validation that extrapolation to deep values
+            results in zero completeness. This only matters if allow_extrap == True.
+            Default is True.
         """
         # Save params
         self._band = band
         self._m5_det = m5_det
+        self.extrap_bright = extrap_bright
 
         # Load the completeness table
         files = []
@@ -69,9 +84,16 @@ class Completeness:
             (self.table.index.to_numpy(), self.table.columns.to_numpy()),
             self.table.values,
             method="linear",
-            bounds_error=False,
+            bounds_error=not allow_extrap,
             fill_value=None,
         )
+
+        # Do a quick check that deep values have zero completeness
+        if allow_extrap and validate_deep:
+            vals = self(m5_det + 10, self.table.index)
+            assert np.allclose(
+                vals, 0
+            ), "Extrapolation to deep values does not yield zero!"
 
     @property
     def band(self) -> str:
@@ -102,9 +124,9 @@ class Completeness:
             # And columns...
             for j in range(table.shape[1]):
                 # If an element is zero, set everything at fainter mags to zero
-                if np.isclose(table.iloc[i, j], 0):
-                    table.iloc[i, :] = 0
-                    break
+                # if np.isclose(table.iloc[i, j], 0):
+                #    table.iloc[i, :] = 0
+                #    break
                 # Else replace elements with max of vals to the right
                 table.iloc[i, j] = table.iloc[i, j:].max()
 
@@ -180,21 +202,18 @@ class Completeness:
         dm = m - self.m5_det
 
         # Clip dm so that brighter mags aren't extrapolated towards 1
-        dm = np.clip(dm, self.table.columns.min(), None)
+        if not self.extrap_bright:
+            dm = np.clip(dm, self.table.columns.min(), None)
 
         # Linear interpolation
         completeness = self._interpolator((z, dm))
 
         # Make sure linear extrapolation bottoms out at 0
-        # (not clipping at 1 because nothing should extrapolate upwards,
-        #  which will be checked in a unit test)
-        completeness = np.clip(completeness, 0, None)
+        if self.extrap_bright:
+            completeness = np.clip(completeness, 0, 1)
+        else:
+            # (not clipping at 1 because nothing should extrapolate upwards,
+            #  which will be checked in a unit test)
+            completeness = np.clip(completeness, 0, None)
 
-        # Make unimodal along both directions
-        completeness = np.atleast_2d(completeness)
-        for i in range(completeness.shape[0]):
-            completeness[i] = self._force_unimodality(completeness[i])
-        for j in range(completeness.shape[1]):
-            completeness[:, j] = self._force_unimodality(completeness[:, j])
-
-        return completeness.squeeze()
+        return completeness

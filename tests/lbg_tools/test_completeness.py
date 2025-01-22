@@ -9,6 +9,9 @@ from lbg_tools import Completeness, library
 def test_extrapolation() -> None:
     """Test expected behavior for extrapolating completeness"""
     for band in library.get_bands():
+        # Print statement in case the test fails
+        print(f"Test failed on band {band}")
+
         completeness = Completeness(band, 0)
 
         # Extrapolate to wide regimes and ensure vals always between (0, 1)
@@ -21,7 +24,12 @@ def test_extrapolation() -> None:
         # Furthermore, check that deep magnitudes are all zero
         assert np.allclose(vals, 0)
 
-        # And that bright magnitudes are all the same
+    # Test when we don't extrapolate bright end
+    for band in library.get_bands():
+        # Completeness without bright-end extrapolation
+        completeness = Completeness(band, 0, extrap_bright=False)
+
+        # Test that bright magnitudes are all the same
         vals0 = completeness(-100, np.linspace(-1, 10))
         vals1 = completeness(-90, np.linspace(-1, 10))
         assert np.allclose(vals0, vals1)
