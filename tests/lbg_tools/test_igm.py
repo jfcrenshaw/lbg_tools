@@ -50,15 +50,19 @@ def test_decrease_with_redshift() -> None:
 
 
 def test_tau_scale() -> None:
+    """Test that IGM optical depth scaling works appropriately"""
     for model in ["inoue", "madau"]:
+        # Create models with 1x and 2x optical depth
         igm1 = IGM(model, scale=1)
         igm2 = IGM(model, scale=2)
 
+        # Calculate tau and transmission at different redshifts
         wavelen = np.linspace(0, 10_000)
-
-        # Calculate at different redshifts
         for z in np.arange(3, 7, 0.5):
+            # Check that tau is correctly scaled
             assert np.allclose(2 * igm1.tau(wavelen, z), igm2.tau(wavelen, z))
+
+            # Check that transmission is lower for 2x tau
             idx = np.where(igm1.transmission(wavelen, z) < 1)
             assert np.all(
                 igm1.transmission(wavelen, z)[idx] > igm2.transmission(wavelen, z)[idx]
