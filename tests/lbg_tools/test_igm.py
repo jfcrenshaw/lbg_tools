@@ -53,8 +53,8 @@ def test_tau_scale() -> None:
     """Test that IGM optical depth scaling works appropriately"""
     for model in ["inoue", "madau"]:
         # Create models with 1x and 2x optical depth
-        igm1 = IGM(model, scale=1)
-        igm2 = IGM(model, scale=2)
+        igm1 = IGM(model, scale=1.0)
+        igm2 = IGM(model, scale=2.0)
 
         # Calculate tau and transmission at different redshifts
         wavelen = np.linspace(0, 10_000)
