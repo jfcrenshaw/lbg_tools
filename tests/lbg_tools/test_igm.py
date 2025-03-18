@@ -47,3 +47,19 @@ def test_decrease_with_redshift() -> None:
         # Make sure they are decreasing
         diffs = np.diff(trans, axis=0)
         assert np.all(diffs <= 0)
+
+
+def test_tau_scale() -> None:
+    for model in ["inoue", "madau"]:
+        igm1 = IGM(model, scale=1)
+        igm2 = IGM(model, scale=2)
+
+        wavelen = np.linspace(0, 10_000)
+
+        # Calculate at different redshifts
+        for z in np.arange(3, 7, 0.5):
+            assert np.allclose(2 * igm1.tau(wavelen, z), igm2.tau(wavelen, z))
+            idx = np.where(igm1.transmission(wavelen, z) < 1)
+            assert np.all(
+                igm1.transmission(wavelen, z)[idx] > igm2.transmission(wavelen, z)[idx]
+            )

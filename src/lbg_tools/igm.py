@@ -12,9 +12,12 @@ class IGM:
     Implements models of
     - Madau 1995: https://ui.adsabs.harvard.edu/abs/1995ApJ...441...18M/abstract
     - Inoue 2014: https://ui.adsabs.harvard.edu/abs/2014MNRAS.442.1805I/abstract
+
+    Also allows for re-scaling of IGM optical depth, inspired by results of
+    Thomas 2021: https://ui.adsabs.harvard.edu/abs/2021A%26A...650A..63T/abstract
     """
 
-    def __init__(self, model: str = "inoue") -> None:
+    def __init__(self, model: str = "inoue", scale: float = 1.0) -> None:
         """Create IGM model.
 
         Parameters
@@ -22,6 +25,8 @@ class IGM:
         model : str, optional
             Name of the IGM model to use. Either "inoue" or "madau".
             Default is "inoue".
+        scale : float, optional
+            Scaling applied to IGM optical depth calculated using the model.
         """
         if model == "inoue":
             self._tau = inoue_tau
@@ -29,6 +34,8 @@ class IGM:
             self._tau = madau_tau
         else:
             raise ValueError(f"IGM model {model} not implemented.")
+
+        self.scale = float(scale)
 
     def tau(self, wavelen: float | np.ndarray, z: float) -> np.ndarray:
         """Calculate optical depth of the IGM.
@@ -54,8 +61,8 @@ class IGM:
         wave_grid = np.linspace(wave_min, wave_max, 10_000)
         tau_grid = self._tau(wavelen=wave_grid, z=z)
 
-        # Now return interpolation
-        return np.interp(wavelen, wave_grid, tau_grid)
+        # Now return (scaled) interpolation
+        return self.scale * np.interp(wavelen, wave_grid, tau_grid)
 
     def transmission(self, wavelen: float | np.ndarray, z: float) -> np.ndarray:
         """Calculate transmission of the IGM.
