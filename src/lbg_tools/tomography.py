@@ -20,6 +20,7 @@ class TomographicBin:
         dz: float = 0,
         f_interlopers: float = 0,
         lf_params: dict | None = None,
+        completeness_params: dict | None = None,
     ) -> None:
         """Create tomographic bin.
 
@@ -43,6 +44,9 @@ class TomographicBin:
         lf_params : dict or None, optional
             Parameters to pass to luminosity function creation.
             The default is None (i.e. default Luminosity Function used)
+        completeness_params : dict or None, optional
+            Additional parameters to pass to the Completeness constructor.
+            Default is None.
         """
         # Set m5_det
         m5_det = mag_cut if m5_det is None else m5_det
@@ -58,7 +62,9 @@ class TomographicBin:
         lf_params = {} if lf_params is None else lf_params
         self._lf_params = lf_params
         lf = LuminosityFunction(**lf_params)
-        self.completeness = Completeness(band, m5_det)
+
+        completeness_params = {} if completeness_params is None else completeness_params
+        self.completeness = Completeness(band, m5_det, **completeness_params)
         self.luminosity_function = lf * self.completeness
 
     @property
