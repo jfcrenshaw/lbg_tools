@@ -1,12 +1,18 @@
 """Class to define tomographic bin."""
 
-import astropy.units as u
 import numpy as np
-from astropy.cosmology import Planck18 as cosmo
+from astropy.cosmology import Cosmology, Planck18
 from scipy.integrate import simpson
 
 from .completeness import Completeness
+from .cosmo_utils import check_cosmology, diff_comoving_volume, luminosity_distance
 from .luminosity_function import LuminosityFunction
+
+# Protected import for optional dependency
+try:
+    import pyccl as ccl
+except ImportError:
+    ccl = None
 
 
 class TomographicBin:
@@ -21,6 +27,7 @@ class TomographicBin:
         f_interlopers: float = 0,
         lf_params: dict | None = None,
         completeness_params: dict | None = None,
+        cosmology: "Cosmology | ccl.Cosmology" = Planck18,
     ) -> None:
         """Create tomographic bin.
 
@@ -43,10 +50,15 @@ class TomographicBin:
             Lyman-/Balmer-break confusion. (the default is zero)
         lf_params : dict or None, optional
             Parameters to pass to luminosity function creation.
-            The default is None (i.e. default Luminosity Function used)
+            The default is None (i.e. default Luminosity Function used).
+            Note if this dictionary contains a cosmology, it will be overridden
+            by the cosmology parameter below.
         completeness_params : dict or None, optional
             Additional parameters to pass to the Completeness constructor.
             Default is None.
+        cosmology : Cosmology or pyccl.Cosmology, optional
+            Astropy or pyccl Cosmology object to use. Default is astropy's Planck18.
+            Note if you want to use pyccl, you must install it yourself.
         """
         # Set m5_det
         m5_det = mag_cut if m5_det is None else m5_det
@@ -58,12 +70,19 @@ class TomographicBin:
         self._dz = dz
         self._f_interlopers = f_interlopers
 
+        # Check and save cosmology
+        check_cosmology(cosmology)
+        self.cosmology = cosmology
+
         # Create luminosity function for tomographic bin
         lf_params = {} if lf_params is None else lf_params
+        lf_params["cosmology"] = self.cosmology  # Override cosmology
         self._lf_params = lf_params
         lf = LuminosityFunction(**lf_params)
 
+        # Create completeness function for tomographic bin
         completeness_params = {} if completeness_params is None else completeness_params
+        self._completeness_params = completeness_params
         self.completeness = Completeness(band, m5_det, **completeness_params)
         self.luminosity_function = lf * self.completeness
 
@@ -137,16 +156,14 @@ class TomographicBin:
         z_lbg = z_lbg[..., None]
 
         # Convert apparent to absolute magnitude
-        DL = cosmo.luminosity_distance(z_lbg).to(u.pc).value  # Lum. Dist. in pc
-        M = m - 5 * np.log10(DL / 10) + 2.5 * np.log10(1 + z_lbg)
+        dL = luminosity_distance(self.cosmology, z_lbg)
+        M = m - 5 * np.log10(dL / 10) + 2.5 * np.log10(1 + z_lbg)
 
         # Calculate luminosity * completeness
         lfc = self.luminosity_function(M, z_lbg)
 
-        # Calculate dV/dz (Mpc^-3 deg^-2)
-        A_sky = 41_253  # deg^2
-        deg2_per_ster = A_sky / (4 * 3.14159)
-        dVdz = cosmo.differential_comoving_volume(z_lbg).value / deg2_per_ster
+        # Calculate dV/dz (Mpc^3 deg^-2)
+        dVdz = diff_comoving_volume(self.cosmology, z_lbg)
 
         # Integrate luminosity function to get number density of galaxies
         # in each redshift bin
@@ -251,6 +268,8 @@ class TomographicBin:
             dz=self.dz,
             f_interlopers=self.f_interlopers,
             lf_params=self._lf_params,
+            completeness_params=self._completeness_params,
+            cosmology=self.cosmology,
         )
 
         # Calculate log10 number density for original and deeper bin

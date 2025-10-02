@@ -166,9 +166,7 @@ def tlc_laf(wavelen: np.ndarray, z: float) -> np.ndarray:
 
         if (z >= 1.2) & (z < 4.7):
             mask = (w >= 1) & (z >= 1.2) & (z < 4.7) & (w < 2.2)
-            vals = (
-                2.55e-2 * (1 + z) ** 1.6 * w**2.1 + 0.325 * w**1.2 - 0.25 * w**2.1
-            )
+            vals = 2.55e-2 * (1 + z) ** 1.6 * w**2.1 + 0.325 * w**1.2 - 0.25 * w**2.1
             tau[mask] = vals[mask]
 
             mask = (w >= 1) & (z >= 1.2) & (z < 4.7) & (w >= 2.2) & (w < 1 + z)
@@ -177,19 +175,11 @@ def tlc_laf(wavelen: np.ndarray, z: float) -> np.ndarray:
 
         else:
             mask = (w >= 1) & (z >= 4.7) & (w < 2.2)
-            vals = (
-                5.22e-4 * (1 + z) ** 3.4 * w**2.1
-                + 0.325 * w**1.2
-                - 3.14e-2 * w**2.1
-            )
+            vals = 5.22e-4 * (1 + z) ** 3.4 * w**2.1 + 0.325 * w**1.2 - 3.14e-2 * w**2.1
             tau[mask] = vals[mask]
 
             mask = (w >= 1) & (z >= 4.7) & (w >= 2.2) & (w < 5.7)
-            vals = (
-                5.22e-4 * (1 + z) ** 3.4 * w**2.1
-                + 0.218 * w**2.1
-                - 2.55e-2 * w**3.7
-            )
+            vals = 5.22e-4 * (1 + z) ** 3.4 * w**2.1 + 0.218 * w**2.1 - 2.55e-2 * w**3.7
             tau[mask] = vals[mask]
 
             mask = (w >= 1) & (z >= 4.7) & (w >= 5.7) & (w < 1 + z)

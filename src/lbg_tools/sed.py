@@ -1,12 +1,18 @@
 """Tools for SED and flux calculations"""
 
-import astropy.units as u
 import numpy as np
-from astropy.cosmology import Planck18 as cosmo
+from astropy.cosmology import Cosmology, Planck18
 from scipy.optimize import minimize_scalar
 
 from .bandpass import Bandpass
+from .cosmo_utils import check_cosmology, luminosity_distance
 from .igm import IGM
+
+# Protected import for optional dependency
+try:
+    import pyccl as ccl
+except ImportError:
+    ccl = None
 
 
 class SED:
@@ -21,6 +27,7 @@ class SED:
         wavelen_min: float = 100,
         wavelen_max: float = 12_000,
         N: int = 1_000,
+        cosmology: "Cosmology | ccl.Cosmology" = Planck18,
     ) -> None:
         """Create SED
 
@@ -48,6 +55,10 @@ class SED:
         self._beta = beta
         self.igm_model = igm_model
         self.wavelen = np.linspace(wavelen_min, wavelen_max, N)
+
+        # Check and save cosmology
+        check_cosmology(cosmology)
+        self.cosmology = cosmology
 
     @staticmethod
     def _beta_uv_model(M: float, z: float) -> float:
@@ -97,9 +108,8 @@ class SED:
         wavelen, flambda = self.truth
 
         # Rescale flux for redshift and luminosity distance
-        flambda /= (1 + self.z) * np.square(
-            cosmo.luminosity_distance(self.z).to(u.pc).value / 10
-        )
+        dL = luminosity_distance(self.cosmology, self.z)
+        flambda /= (1 + self.z) * (dL / 10) ** 2
 
         # Redshift the wavelength grid
         wavelen *= 1 + self.z
