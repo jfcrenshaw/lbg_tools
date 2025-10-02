@@ -3,11 +3,17 @@
 import copy
 from typing import Callable, Self
 
-import astropy.units as u
 import numpy as np
-from astropy.cosmology import Planck18 as cosmo
+from astropy.cosmology import Cosmology, Planck18
+
+# Protected import for optional dependency
+try:
+    import pyccl as ccl
+except ImportError:
+    ccl = None
 
 from .completeness import Completeness
+from .cosmo_utils import check_cosmology, luminosity_distance
 
 
 class LuminosityFunction:
@@ -27,6 +33,7 @@ class LuminosityFunction:
         alpha1: float = -0.11,
         beta0: float = -4.79,
         beta1: float = 0.05,
+        cosmology: "Cosmology | ccl.Cosmology" = Planck18,
     ) -> None:
         """Create luminosity function.
 
@@ -56,6 +63,9 @@ class LuminosityFunction:
         beta1 : float, optional
             Linear term in beta parameterization, by default 0.05
             beta is the bright-end slope.
+        cosmology : Cosmology or pyccl.Cosmology, optional
+            Astropy or pyccl Cosmology object to use. Default is astropy's Planck18.
+            Note if you want to use pyccl, you must install it yourself.
         """
         # Save params
         self.phi0 = phi0
@@ -66,6 +76,10 @@ class LuminosityFunction:
         self.alpha1 = alpha1
         self.beta0 = beta0
         self.beta1 = beta1
+
+        # Check and save cosmology
+        check_cosmology(cosmology)
+        self.cosmology = cosmology
 
         # Completeness function is just identity
         self.completeness: Completeness | Callable = lambda m, z: 1
@@ -207,8 +221,8 @@ class LuminosityFunction:
             True number density in units of mag^-1 Mpc^-3
         """
         # Convert absolute magnitude to apparent magnitude
-        DL = cosmo.luminosity_distance(z).to(u.pc).value  # Lum. Dist. in pc
-        m = M + 5 * np.log10(DL / 10) - 2.5 * np.log10(1 + z)
+        dL = luminosity_distance(self.cosmology, z)
+        m = M + 5 * np.log10(dL / 10) - 2.5 * np.log10(1 + z)
 
         # Calculate completeness multipliers
         completeness = self.completeness(m, z)
