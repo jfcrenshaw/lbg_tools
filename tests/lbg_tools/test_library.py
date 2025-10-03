@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from lbg_tools import library
 
 
@@ -16,6 +18,10 @@ def test_add_data_directory() -> None:
     library.add_directory(test_dir)
     files = [str(file) for file in library.files]
     assert __file__ in files
+
+    # Adding non-existent directory should throw error
+    with pytest.raises(ValueError):
+        library.add_directory("fake/directory/path")
 
 
 def test_completeness_files() -> None:

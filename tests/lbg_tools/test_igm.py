@@ -58,7 +58,7 @@ def test_tau_scale() -> None:
 
         # Calculate tau and transmission at different redshifts
         wavelen = np.linspace(0, 10_000)
-        for z in np.arange(3, 7, 0.5):
+        for z in np.arange(3, 7, 0.5).astype(float):
             # Check that tau is correctly scaled
             assert np.allclose(2 * igm1.tau(wavelen, z), igm2.tau(wavelen, z))
 

@@ -39,3 +39,10 @@ def test_effective_wavelength() -> None:
     eff_wavelen_2 = bandpass.calc_eff_wavelength(*sed2.truth)  # shorter
 
     assert eff_wavelen_1 > eff_wavelen_2
+
+
+def test_band_fwhm() -> None:
+    """Check that band FWHM is positive and reasonable."""
+    for band in library.get_bands():
+        bp = Bandpass(band)
+        assert 100 < bp.fwhm < 10_000  # Angstroms

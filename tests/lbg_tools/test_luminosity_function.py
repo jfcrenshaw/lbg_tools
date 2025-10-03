@@ -31,3 +31,16 @@ def test_completeness() -> None:
     obs = lf(M, z)
     assert not np.allclose(true, obs)
     assert np.all(obs <= true)
+
+    # Check right multiply too
+    lf2 = LuminosityFunction()
+    lf2 = Completeness(library.get_bands()[0], 26.0) * lf2
+    obs2 = lf2(M, z)
+    assert np.allclose(obs, obs2)
+
+
+def test_bad_multiply() -> None:
+    """Test that multiplying by non-completeness object throws error."""
+    lf = LuminosityFunction()
+    with np.testing.assert_raises(TypeError):
+        lf *= 5  # type: ignore

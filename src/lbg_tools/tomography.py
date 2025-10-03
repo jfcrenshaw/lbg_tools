@@ -11,7 +11,7 @@ from .luminosity_function import LuminosityFunction
 # Protected import for optional dependency
 try:
     import pyccl as ccl
-except ImportError:
+except ImportError:  # pragma: no cover
     ccl = None
 
 
@@ -23,8 +23,11 @@ class TomographicBin:
         band: str,
         mag_cut: float,
         m5_det: float | None = None,
-        dz: float = 0,
-        f_interlopers: float = 0,
+        dz: float = 0.0,
+        stretch: float = 1.0,
+        f_interlopers: float = 0.0,
+        dz_interlopers: float = 0.0,
+        stretch_interlopers: float = 1.0,
         lf_params: dict | None = None,
         completeness_params: dict | None = None,
         cosmology: "Cosmology | ccl.Cosmology" = Planck18,
@@ -44,10 +47,20 @@ class TomographicBin:
             Amount by which to shift the distribution of true LBGs (i.e.
             interlopers are not shifted). This corresponds to the DES delta z
             nuisance parameters. (the default is zero)
+        stretch : float, optional
+            Stretch factor for the width of the true LBG redshift distribution.
+            (the default is 1.0)
         f_interlopers : float, optional
             Fraction of low-redshift interlopers. Same p(z) shape is used
             for interlopers, but shifted to the redshift corresponding to
             Lyman-/Balmer-break confusion. (the default is zero)
+        dz_interlopers : float, optional
+            Amount by which to shift the distribution of interlopers (i.e.
+            true LBGs are not shifted). This corresponds to the DES delta z
+            nuisance parameters. (the default is zero)
+        stretch_interlopers : float, optional
+            Stretch factor for the width of the interloper redshift distribution.
+            (the default is 1.0)
         lf_params : dict or None, optional
             Parameters to pass to luminosity function creation.
             The default is None (i.e. default Luminosity Function used).
@@ -68,7 +81,10 @@ class TomographicBin:
         self._mag_cut = mag_cut
         self._m5_det = m5_det
         self._dz = dz
+        self._stretch = stretch
         self._f_interlopers = f_interlopers
+        self._dz_interlopers = dz_interlopers
+        self._stretch_interlopers = stretch_interlopers
 
         # Check and save cosmology
         check_cosmology(cosmology)
@@ -85,6 +101,9 @@ class TomographicBin:
         self._completeness_params = completeness_params
         self.completeness = Completeness(band, m5_det, **completeness_params)
         self.luminosity_function = lf * self.completeness
+
+        # Calculate n(z)
+        self._calc_nz()
 
     @property
     def band(self) -> str:
@@ -107,12 +126,27 @@ class TomographicBin:
         return self._dz
 
     @property
+    def stretch(self) -> float:
+        """Stretch factor for true LBG redshift distribution"""
+        return self._stretch
+
+    @property
     def f_interlopers(self) -> float:
         """Interloper fraction"""
         return self._f_interlopers
 
-    def _get_z_grids(self) -> tuple[np.ndarray, np.ndarray]:
-        """Return the two redshift grids.
+    @property
+    def dz_interlopers(self) -> float:
+        """Shift in interloper redshift distribution"""
+        return self._dz_interlopers
+
+    @property
+    def stretch_interlopers(self) -> float:
+        """Stretch factor for interloper redshift distribution"""
+        return self._stretch_interlopers
+
+    def _calc_nz(self) -> None:
+        """Perform n(z) calculation to set everything up.
 
         Returns
         -------
@@ -133,24 +167,8 @@ class TomographicBin:
         mask = z_interlopers > 0
         z_interlopers = z_interlopers[mask]
 
-        return z_interlopers, z_lbg
-
-    @property
-    def nz(self) -> tuple[np.ndarray, np.ndarray]:
-        """Projected number density per redshift
-
-        Returns
-        -------
-        np.ndarray
-            Redshift grid
-        np.ndarray
-            Number density of galaxies in each bin
-        """
         # Create grid over apparent magnitude
         m = np.linspace(20, self.mag_cut, 101)
-
-        # Get redshift grids
-        z_interlopers, z_lbg = self._get_z_grids()
 
         # Expand dimension on LBG redshifts for calculations below
         z_lbg = z_lbg[..., None]
@@ -173,25 +191,58 @@ class TomographicBin:
         z_lbg = z_lbg.squeeze()
 
         # Generate interloper distribution
-        if self.f_interlopers > 0:
-            # Rescale to appropriate interloper fraction
-            nz_interlopers = nz_lbg[-z_interlopers.size :].copy()
-            nz_interlopers /= simpson(nz_interlopers, x=z_interlopers)
-            N_lbg = simpson(nz_lbg, x=z_lbg)
-            N_interlopers = N_lbg * self.f_interlopers / (1 - self.f_interlopers)
-            nz_interlopers *= N_interlopers
-        else:
-            z_interlopers = np.array([])
-            nz_interlopers = np.array([])
+        nz_interlopers = nz_lbg[-z_interlopers.size :].copy()
+        nz_interlopers /= simpson(nz_interlopers, x=z_interlopers)
+        N_lbg = simpson(nz_lbg, x=z_lbg)
+        N_interlopers = N_lbg * self.f_interlopers / (1 - self.f_interlopers)
+        nz_interlopers *= N_interlopers
 
-        # Shift the true LBG distribution
+        # Shift distributions
         z_lbg += self.dz
+        z_interlopers += self.dz_interlopers
+
+        # Stretch distributions
+        z_lbg = self.stretch * (z_lbg - z_lbg.mean()) + z_lbg.mean()
+        z_interlopers = (
+            self.stretch_interlopers * (z_interlopers - z_interlopers.mean())
+            + z_interlopers.mean()
+        )
+
+        # Remove negative redshifts
+        mask = z_interlopers > 0
+        z_interlopers = z_interlopers[mask]
+        nz_interlopers = nz_interlopers[mask]
+
+        # Re-normalize distributions
+        nz_lbg *= N_lbg / simpson(nz_lbg, x=z_lbg)
+        if self.f_interlopers > 0:
+            nz_interlopers *= N_interlopers / simpson(nz_interlopers, x=z_interlopers)
 
         # Combine true and interloper distributions
         z = np.concatenate((z_interlopers, z_lbg))
         nz = np.concatenate((nz_interlopers, nz_lbg))
 
-        return z, nz
+        # Save values to be reused
+        self._z_interlopers = z_interlopers
+        self._z_lbg = z_lbg.squeeze()
+        self._nz_interlopers = nz_interlopers
+        self._nz_lbg = nz_lbg
+        self._z = z
+        self._nz = nz
+        self._density = N_lbg + N_interlopers
+
+    @property
+    def nz(self) -> tuple[np.ndarray, np.ndarray]:
+        """Projected number density per redshift
+
+        Returns
+        -------
+        np.ndarray
+            Redshift grid
+        np.ndarray
+            Number density of galaxies in each bin
+        """
+        return self._z, self._nz
 
     @property
     def number_density(self) -> float:
@@ -202,13 +253,7 @@ class TomographicBin:
         float
             Total projected number density of LBGs in units deg^-2
         """
-        # Number density in each redshift bin
-        z, nz = self.nz
-
-        # Integrate over redshift bins
-        n = simpson(nz, x=z, axis=-1)
-
-        return n
+        return self._density
 
     @property
     def pz(self) -> tuple[np.ndarray, np.ndarray]:
@@ -221,13 +266,8 @@ class TomographicBin:
         np.ndarray
             Normalized redshift distribution
         """
-        # Number density in each redshift bin
         z, nz = self.nz
-
-        # Integrate over redshift bins
-        n = np.atleast_1d(simpson(nz, x=z, axis=-1))
-
-        # Normalize redshift distribution
+        n = np.atleast_1d(self.number_density)
         pz = nz / n[:, None]
 
         return z, pz.squeeze()
@@ -236,19 +276,15 @@ class TomographicBin:
     def g_bias(self) -> tuple[np.ndarray, np.ndarray]:
         """Linear galaxy bias"""
         # Get redshift distributions
-        z_interlopers, z_lbg = self._get_z_grids()
+        z_interlopers, z_lbg = self._z_interlopers, self._z_lbg
 
         # Calculate the galaxy bias
         # TODO: better interloper bias
         b_interlopers = 0.28 * (1 + z_interlopers) ** 1.6
         b_lbg = 0.28 * (1 + z_lbg) ** 1.6
 
-        if self.f_interlopers > 0:
-            z = np.concatenate((z_interlopers, z_lbg))
-            b = np.concatenate((b_interlopers, b_lbg))
-        else:
-            z = z_lbg
-            b = b_lbg
+        z = np.concatenate((z_interlopers, z_lbg))
+        b = np.concatenate((b_interlopers, b_lbg))
 
         return z, b
 
@@ -266,7 +302,10 @@ class TomographicBin:
             mag_cut=self.mag_cut + dm,
             m5_det=self.m5_det + dm,
             dz=self.dz,
+            stretch=self.stretch,
             f_interlopers=self.f_interlopers,
+            dz_interlopers=self.dz_interlopers,
+            stretch_interlopers=self.stretch_interlopers,
             lf_params=self._lf_params,
             completeness_params=self._completeness_params,
             cosmology=self.cosmology,

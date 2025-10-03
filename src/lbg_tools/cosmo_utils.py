@@ -9,7 +9,7 @@ from astropy.cosmology import Cosmology
 # Protected import for optional dependency
 try:
     import pyccl as ccl
-except ImportError:
+except ImportError:  # pragma: no cover
     ccl = None
 
 
@@ -50,7 +50,7 @@ def luminosity_distance(
         Luminosity distance in parsecs.
     """
     check_cosmology(cosmology)
-    if ccl is not None and isinstance(cosmology, ccl.Cosmology):
+    if ccl is not None and isinstance(cosmology, ccl.Cosmology):  # pragma: no cover
         z = np.atleast_1d(z)
         dL = 1e6 * ccl.luminosity_distance(cosmology, 1 / (1 + z.flatten()))
         dL = dL.reshape(z.shape)
@@ -82,7 +82,7 @@ def diff_comoving_volume(
     check_cosmology(cosmology)
 
     # Some constants for converting steradian -> deg^2
-    if ccl is not None and isinstance(cosmology, ccl.Cosmology):
+    if ccl is not None and isinstance(cosmology, ccl.Cosmology):  # pragma: no cover
         z = np.atleast_1d(z)
         dVda = ccl.comoving_volume_element(cosmology, 1 / (1 + z.flatten()))
         dVdz = dVda.reshape(z.shape) / (1 + z) ** 2
