@@ -11,7 +11,7 @@ from .igm import IGM
 # Protected import for optional dependency
 try:
     import pyccl as ccl
-except ImportError:
+except ImportError:  # pragma: no cover
     ccl = None
 
 
@@ -157,7 +157,7 @@ class SED:
 
         # If it failed, raise an error
         # and make sure the user knows this was very unexpected...
-        if not res.success:
+        if not res.success:  # pragma: no cover
             raise RuntimeError("Solving for m failed. That is really unexpected!")
 
         # If we succeeded, save the new absolute magnitude

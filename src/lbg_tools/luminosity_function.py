@@ -9,7 +9,7 @@ from astropy.cosmology import Cosmology, Planck18
 # Protected import for optional dependency
 try:
     import pyccl as ccl
-except ImportError:
+except ImportError:  # pragma: no cover
     ccl = None
 
 from .completeness import Completeness

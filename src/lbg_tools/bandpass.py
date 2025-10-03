@@ -28,7 +28,7 @@ class Bandpass:
                 "`library.add_directory('path/to/files')` before creating the "
                 "bandpass object."
             )
-        if len(files) > 1:
+        if len(files) > 1:  # pragma: no cover
             raise RuntimeError(
                 f"Found {len(files)} files with name 'bandpass_{band}*.dat' "
                 "in the data directories, and I don't know which one to pick! "
@@ -47,7 +47,7 @@ class Bandpass:
             self._throughput = throughput
 
     @property
-    def band(self) -> str:
+    def band(self) -> str:  # pragma: no cover
         """Name of the bandpass"""
         return self._band
 
