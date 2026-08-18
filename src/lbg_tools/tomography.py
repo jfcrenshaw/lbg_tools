@@ -15,6 +15,47 @@ except ImportError:  # pragma: no cover
     ccl = None
 
 
+def _truncate_at_zero(
+    z: np.ndarray,
+    nz: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Restrict a redshift distribution to positive redshifts.
+
+    Galaxies cannot sit at negative redshift, so a distribution that has been
+    shifted or stretched below zero has to be cut off there. Discarding the
+    sample points that have gone negative would make the distribution a
+    discontinuous function of the shift, because each point carries a finite
+    part of the integral: crossing zero would remove it all at once. Instead the
+    distribution is cut where it belongs, at zero, with the value there
+    interpolated from its neighbours.
+
+    Parameters
+    ----------
+    z : np.ndarray
+        Redshift grid, increasing.
+    nz : np.ndarray
+        Number density per unit redshift on that grid.
+
+    Returns
+    -------
+    np.ndarray
+        The grid, starting at zero if it previously started below it.
+    np.ndarray
+        The number density on that grid.
+    """
+    if z.size == 0 or z[0] >= 0:
+        return z, nz
+
+    positive = z > 0
+    if not positive.any():
+        return z[:0], nz[:0]
+
+    return (
+        np.concatenate(([0.0], z[positive])),
+        np.concatenate(([np.interp(0.0, z, nz)], nz[positive])),
+    )
+
+
 class TomographicBin:
     """Tomographic sample of LBGs."""
 
@@ -210,14 +251,13 @@ class TomographicBin:
             + z_interlopers.mean()
         )
 
-        # Remove negative redshifts
-        mask = z_interlopers > 0
-        z_interlopers = z_interlopers[mask]
-        nz_interlopers = nz_interlopers[mask]
+        # Cut the interloper distribution off at zero redshift
+        z_interlopers, nz_interlopers = _truncate_at_zero(z_interlopers, nz_interlopers)
 
-        # Re-normalize distributions
+        # Re-normalize distributions. A shift large enough to push the whole
+        # interloper distribution below zero leaves nothing to normalize.
         nz_lbg *= N_lbg / simpson(nz_lbg, x=z_lbg)
-        if self.f_interlopers > 0:
+        if self.f_interlopers > 0 and z_interlopers.size > 1:
             nz_interlopers *= N_interlopers / simpson(nz_interlopers, x=z_interlopers)
 
         # Combine true and interloper distributions

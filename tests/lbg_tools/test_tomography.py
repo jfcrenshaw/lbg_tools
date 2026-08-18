@@ -83,3 +83,43 @@ def test_stretch() -> None:
     var0 = np.trapezoid((z0 - mean0) ** 2 * pz0, z0) / np.trapezoid(pz0, z0)
     var1 = np.trapezoid((z1 - mean1) ** 2 * pz1, z1) / np.trapezoid(pz1, z1)
     assert var1 > var0
+
+
+def test_interlopers_stay_continuous_across_zero_redshift() -> None:
+    """Test that shifting interlopers below z=0 does not jump discontinuously."""
+    # The u-dropout interloper grid starts just above zero, so a small negative
+    # shift pushes its first point below zero. Cutting the distribution off at
+    # zero has to leave it a continuous function of the shift; discarding the
+    # sample point instead would remove a finite part of the integral at once.
+    grid = np.linspace(0, 1, 2001)
+
+    def mean_redshift(dz_interlopers: float) -> float:
+        """Mean interloper redshift, measured on a fixed grid."""
+        tbin = TomographicBin(
+            "u", 24.5, 24.5, f_interlopers=0.2, dz_interlopers=dz_interlopers
+        )
+        z, nz = tbin.nz
+        n_interlopers = tbin._z_interlopers.size
+        resampled = np.interp(
+            grid, z[:n_interlopers], nz[:n_interlopers], left=0, right=0
+        )
+        return np.trapezoid(grid * resampled, grid) / np.trapezoid(resampled, grid)
+
+    # Take the same size of step across the crossing and well away from it. A
+    # continuous distribution changes by a comparable amount either way; one that
+    # loses a sample point at the crossing does not. Comparing the two needs no
+    # tolerance to be chosen by hand.
+    crossing = TomographicBin("u", 24.5, 24.5, f_interlopers=0.2)._z_interlopers[0]
+    step = 1e-6
+    across = abs(mean_redshift(-crossing + step) - mean_redshift(-crossing - step))
+    away = abs(mean_redshift(0.01 + step) - mean_redshift(0.01 - step))
+    assert across < 10 * max(away, 1e-12)
+
+    # A shift larger than the grid spacing does legitimately drop points, but the
+    # distribution stays physical and keeps moving in the same direction
+    means = []
+    for dz in (-0.10, -0.05, -0.01, 0.0, 0.01, 0.05, 0.10):
+        tbin = TomographicBin("u", 24.5, 24.5, f_interlopers=0.2, dz_interlopers=dz)
+        assert tbin._z_interlopers.min() >= 0
+        means.append(mean_redshift(dz))
+    assert np.all(np.diff(means) > 0)
