@@ -1,5 +1,7 @@
 """Class to define tomographic bin."""
 
+import warnings
+
 import numpy as np
 from astropy.cosmology import Cosmology, Planck18
 from scipy.integrate import simpson
@@ -56,6 +58,63 @@ def _truncate_at_zero(
     )
 
 
+def lbg_bias(mag_cut: float, z: float | np.ndarray) -> np.ndarray:
+    """Linear bias of a Lyman-break sample limited at an apparent magnitude.
+
+    Equation 2.7 of Wilson & White 2019 (arXiv:1904.13378), a low-order
+    polynomial in (1 + z) fit to a compilation of Lyman-break galaxy bias
+    measurements. The first term is stable clustering, b D+ = constant; the
+    second captures the bias rising more steeply at high redshift, which the
+    authors attribute to the apparent magnitude limit. The same relation is used
+    by Sailer et al. 2021 (arXiv:2106.09713) and Ebina & White 2024
+    (arXiv:2401.13166, their equation 2.9).
+
+    Parameters
+    ----------
+    mag_cut : float
+        Apparent magnitude limit of the sample, in the detection band.
+    z : float or np.ndarray
+        Redshift(s) at which to evaluate the bias.
+
+    Returns
+    -------
+    np.ndarray
+        Linear galaxy bias.
+
+    Warns
+    -----
+    UserWarning
+        If ``mag_cut`` falls outside 24 < m < 25.5, the range of depths Wilson &
+        White show, or if the relation returns a non-positive bias. It is an
+        interpolation of a data compilation with no physical floor, so it goes
+        negative for faint limits at low redshift: at m = 26 it crosses zero at
+        z = 2.3.
+    """
+    if not 24.0 <= mag_cut <= 25.5:
+        warnings.warn(
+            f"mag_cut={mag_cut} is outside 24 < m < 25.5, the range of depths "
+            "Wilson & White 2019 fit their bias relation over. The relation is "
+            "an interpolation, so treat the result as an extrapolation.",
+            stacklevel=2,
+        )
+
+    A = -0.98 * (mag_cut - 25) + 0.11
+    B = 0.12 * (mag_cut - 25) + 0.17
+    b = A * (1 + np.asarray(z, dtype=float)) + B * (1 + np.asarray(z, dtype=float)) ** 2
+
+    if np.any(b <= 0):
+        warnings.warn(
+            f"The Wilson & White 2019 bias relation is non-positive somewhere on "
+            f"this redshift grid for mag_cut={mag_cut}. It is a fit to a data "
+            "compilation rather than a physical model, and it has no positive "
+            "floor. Check that the redshift range is the 2 < z < 5 the relation "
+            "was calibrated for.",
+            stacklevel=2,
+        )
+
+    return b
+
+
 class TomographicBin:
     """Tomographic sample of LBGs."""
 
@@ -69,6 +128,7 @@ class TomographicBin:
         f_interlopers: float = 0.0,
         dz_interlopers: float = 0.0,
         stretch_interlopers: float = 1.0,
+        b_interlopers: float = 1.5,
         lf_params: dict | None = None,
         completeness_params: dict | None = None,
         cosmology: "Cosmology | ccl.Cosmology" = Planck18,
@@ -102,6 +162,12 @@ class TomographicBin:
         stretch_interlopers : float, optional
             Stretch factor for the width of the interloper redshift distribution.
             (the default is 1.0)
+        b_interlopers : float, optional
+            Linear galaxy bias of the interlopers, taken as constant across their
+            redshift range. It is a free input rather than a formula because the
+            interloper population is a mix of galaxy types that the Lyman-break
+            bias relation does not describe. The default, 1.5, is typical of the
+            low-redshift lens samples interlopers resemble.
         lf_params : dict or None, optional
             Parameters to pass to luminosity function creation.
             The default is None (i.e. default Luminosity Function used).
@@ -126,6 +192,7 @@ class TomographicBin:
         self._f_interlopers = f_interlopers
         self._dz_interlopers = dz_interlopers
         self._stretch_interlopers = stretch_interlopers
+        self._b_interlopers = b_interlopers
 
         # Check and save cosmology
         check_cosmology(cosmology)
@@ -185,6 +252,11 @@ class TomographicBin:
     def stretch_interlopers(self) -> float:
         """Stretch factor for interloper redshift distribution"""
         return self._stretch_interlopers
+
+    @property
+    def b_interlopers(self) -> float:
+        """Linear galaxy bias of the interlopers"""
+        return self._b_interlopers
 
     def _calc_nz(self) -> None:
         """Perform n(z) calculation to set everything up.
@@ -287,6 +359,53 @@ class TomographicBin:
         return self._z, self._nz
 
     @property
+    def z_lbg(self) -> np.ndarray:
+        """Redshift grid of the true Lyman-break galaxies
+
+        The grid returned by :attr:`nz` is this grid concatenated onto
+        :attr:`z_interlopers`, with a gap between the two populations.
+
+        Returns
+        -------
+        np.ndarray
+            Redshift grid of the Lyman-break half of the sample
+        """
+        return self._z_lbg
+
+    @property
+    def nz_lbg(self) -> np.ndarray:
+        """Projected number density per redshift of the true Lyman-break galaxies
+
+        Returns
+        -------
+        np.ndarray
+            Number density on :attr:`z_lbg`, in deg^-2 per unit redshift
+        """
+        return self._nz_lbg
+
+    @property
+    def z_interlopers(self) -> np.ndarray:
+        """Redshift grid of the low-redshift interlopers
+
+        Returns
+        -------
+        np.ndarray
+            Redshift grid of the interloper half of the sample
+        """
+        return self._z_interlopers
+
+    @property
+    def nz_interlopers(self) -> np.ndarray:
+        """Projected number density per redshift of the low-redshift interlopers
+
+        Returns
+        -------
+        np.ndarray
+            Number density on :attr:`z_interlopers`, in deg^-2 per unit redshift
+        """
+        return self._nz_interlopers
+
+    @property
     def number_density(self) -> float:
         """Number density in deg^2
 
@@ -316,14 +435,26 @@ class TomographicBin:
 
     @property
     def g_bias(self) -> tuple[np.ndarray, np.ndarray]:
-        """Linear galaxy bias"""
+        """Linear galaxy bias
+
+        The Lyman-break half uses :func:`lbg_bias`, which depends on both the
+        apparent magnitude limit and redshift. The interloper half is the constant
+        :attr:`b_interlopers`, because the Lyman-break relation is calibrated for
+        2 < z < 5 and returns negative bias at interloper redshifts.
+
+        Returns
+        -------
+        np.ndarray
+            Redshift grid
+        np.ndarray
+            Linear galaxy bias on that grid
+        """
         # Get redshift distributions
-        z_interlopers, z_lbg = self._z_interlopers, self._z_lbg
+        z_interlopers, z_lbg = self.z_interlopers, self.z_lbg
 
         # Calculate the galaxy bias
-        # TODO: better interloper bias
-        b_interlopers = 0.28 * (1 + z_interlopers) ** 1.6
-        b_lbg = 0.28 * (1 + z_lbg) ** 1.6
+        b_interlopers = np.full_like(z_interlopers, self.b_interlopers)
+        b_lbg = lbg_bias(self.mag_cut, z_lbg)
 
         z = np.concatenate((z_interlopers, z_lbg))
         b = np.concatenate((b_interlopers, b_lbg))

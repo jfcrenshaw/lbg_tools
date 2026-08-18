@@ -123,3 +123,64 @@ def test_interlopers_stay_continuous_across_zero_redshift() -> None:
         assert tbin._z_interlopers.min() >= 0
         means.append(mean_redshift(dz))
     assert np.all(np.diff(means) > 0)
+
+
+def test_lbg_bias_matches_wilson_white() -> None:
+    """Check lbg_bias against Wilson & White 2019 equation 2.7 evaluated by hand."""
+    from lbg_tools import lbg_bias
+
+    # m = 25 is where the fit's linear coefficients take their intercepts,
+    # A = 0.11 and B = 0.17, so the relation is easy to check by hand there.
+    assert np.isclose(lbg_bias(25.0, 3.0), 0.11 * 4 + 0.17 * 16)
+
+    # Brighter samples sit in more massive halos, so they are more biased.
+    assert lbg_bias(24.5, 3.0) > lbg_bias(25.0, 3.0) > lbg_bias(25.4, 3.0)
+
+    # Bias rises with redshift at fixed depth across the dropout range.
+    z = np.linspace(2, 5, 20)
+    assert np.all(np.diff(lbg_bias(25.0, z)) > 0)
+
+
+def test_lbg_bias_warns_outside_fit_range() -> None:
+    """The relation is an interpolation; extrapolating it should say so."""
+    from lbg_tools import lbg_bias
+
+    with pytest.warns(UserWarning, match="outside 24"):
+        lbg_bias(26.5, 3.0)
+
+    # Faint limits drive the relation negative, which is unphysical rather than
+    # merely uncertain, so that gets its own warning.
+    with pytest.warns(UserWarning, match="non-positive"):
+        lbg_bias(27.0, 1.0)
+
+
+def test_public_population_split() -> None:
+    """The two populations are exposed separately and concatenate back to nz."""
+    tbin = TomographicBin("u", 24.5, 24.5, f_interlopers=0.2)
+
+    z, nz = tbin.nz
+    assert np.allclose(z, np.concatenate((tbin.z_interlopers, tbin.z_lbg)))
+    assert np.allclose(nz, np.concatenate((tbin.nz_interlopers, tbin.nz_lbg)))
+
+    # The populations are disjoint, with a gap between them.
+    assert tbin.z_interlopers.max() < tbin.z_lbg.min()
+
+    # With no interlopers there is nothing in the interloper half.
+    tbin = TomographicBin("u", 24.5, 24.5, f_interlopers=0)
+    assert np.allclose(tbin.nz_interlopers, 0)
+
+
+def test_interloper_bias_is_configurable() -> None:
+    """The interloper bias is an input, constant across their redshift range."""
+    tbin = TomographicBin("u", 24.5, 24.5, f_interlopers=0.2)
+    assert tbin.b_interlopers == 1.5
+
+    tbin = TomographicBin("u", 24.5, 24.5, f_interlopers=0.2, b_interlopers=1.9)
+    assert tbin.b_interlopers == 1.9
+
+    _, b = tbin.g_bias
+    n_interlopers = tbin.z_interlopers.size
+    assert np.allclose(b[:n_interlopers], 1.9)
+
+    # The Lyman-break half is unaffected and still rises with redshift.
+    assert np.all(np.diff(b[n_interlopers:]) > 0)
