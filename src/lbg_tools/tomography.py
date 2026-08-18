@@ -156,7 +156,9 @@ class TomographicBin:
             True LBG redshift grid
         """
         # Get grid from completeness table
-        z_lbg = self.completeness.table.index.to_numpy()
+        # np.array rather than to_numpy, because pandas >= 3 returns a
+        # read-only view of the index, and the grid is shifted in place below
+        z_lbg = np.array(self.completeness.table.index)
 
         # Create interloper grid
         lambda_L = 1216  # angstroms
