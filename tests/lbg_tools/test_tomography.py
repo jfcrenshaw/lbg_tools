@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+from scipy.integrate import simpson
 
 from lbg_tools import TomographicBin, library
 
@@ -187,18 +188,120 @@ def test_interloper_bias_is_configurable() -> None:
 
 
 def test_interlopers_shifted_entirely_below_zero() -> None:
-    """A shift large enough to push every interloper below zero leaves none."""
-    tbin = TomographicBin("u", 24.5, 24.5, f_interlopers=0.2, dz_interlopers=-2)
+    """A shift that leaves no support for the interlopers is refused.
 
+    The number of galaxies passing the selection is an observable; dz and
+    stretch express uncertainty in where they sit in redshift, not in how many
+    there are. If every interloper is pushed below zero there is nowhere to put
+    them, so the model says so rather than quietly losing them.
+    """
+    with pytest.raises(ValueError, match="below zero redshift"):
+        TomographicBin("u", 24.5, 24.5, f_interlopers=0.2, dz_interlopers=-2)
+
+    # With no interlopers to place, there is nothing to refuse.
+    tbin = TomographicBin("u", 24.5, 24.5, f_interlopers=0.0, dz_interlopers=-2)
     assert tbin.z_interlopers.size == 0
-    assert tbin.nz_interlopers.size == 0
-
-    # What survives is the Lyman-break half alone, still a valid distribution.
     z, nz = tbin.nz
     assert np.allclose(z, tbin.z_lbg)
-    assert np.all(np.isfinite(nz))
-    assert z.min() >= 0
+    assert np.allclose(nz, tbin.nz_lbg)
 
-    # The bias still evaluates on whatever grid is left.
-    _, b = tbin.g_bias
-    assert b.size == z.size
+
+def test_selected_number_is_invariant_under_the_nuisances() -> None:
+    """Shifting or stretching either population conserves the galaxy count.
+
+    Checked per population, because nz concatenates two disjoint grids and
+    integrating across the gap between them is meaningless.
+    """
+
+    def totals(
+        dz: float = 0.0,
+        stretch: float = 1.0,
+        dz_interlopers: float = 0.0,
+        stretch_interlopers: float = 1.0,
+    ) -> tuple[float, float]:
+        tbin = TomographicBin(
+            "u",
+            24.5,
+            24.5,
+            f_interlopers=0.2,
+            dz=dz,
+            stretch=stretch,
+            dz_interlopers=dz_interlopers,
+            stretch_interlopers=stretch_interlopers,
+        )
+        lbg = simpson(tbin.nz_lbg, x=tbin.z_lbg)
+        interlopers = simpson(tbin.nz_interlopers, x=tbin.z_interlopers)
+        return tbin.number_density, lbg + interlopers
+
+    density, total = totals()
+    for kwargs in (
+        {"dz": 0.05},
+        {"stretch": 1.15},
+        {"dz_interlopers": -0.2},  # truncates part of the population at zero
+        {"stretch_interlopers": 1.3},
+        {"dz": -0.1, "stretch": 0.85},
+    ):
+        moved_density, moved_total = totals(**kwargs)
+
+        # The two halves account for the whole sample...
+        assert np.isclose(moved_total, moved_density), kwargs
+        # ...and the sample is the same size as it was.
+        assert np.isclose(moved_density, density), kwargs
+        assert np.isclose(moved_total, total), kwargs
+
+
+def test_stretch_changes_the_width_and_not_the_mean() -> None:
+    """Stretch is width-only, so it does not double as a shift.
+
+    It pivots on the number-weighted mean rather than the midpoint of the grid.
+    Those differ by 0.047 for this sample, so pivoting on the grid moved the mean
+    by 0.005 per 10 per cent of stretch -- enough to matter for an analysis that
+    treats the shift and the width as separate parameters.
+    """
+
+    def moments(dz: float = 0.0, stretch: float = 1.0) -> tuple[float, float]:
+        tbin = TomographicBin(
+            "u", 24.76, 24.85, f_interlopers=0.14, dz=dz, stretch=stretch
+        )
+        z, nz = tbin.z_lbg, tbin.nz_lbg
+        weight = simpson(nz, x=z)
+        mean = simpson(z * nz, x=z) / weight
+        var = simpson((z - mean) ** 2 * nz, x=z) / weight
+        return mean, np.sqrt(var)
+
+    mean, sigma = moments()
+    for stretch in (0.9, 1.05, 1.1, 1.25):
+        stretched_mean, stretched_sigma = moments(stretch=stretch)
+        assert np.isclose(stretched_mean, mean, atol=1e-10), stretch
+        assert np.isclose(stretched_sigma, stretch * sigma), stretch
+
+    # dz still moves the mean, and only the mean.
+    shifted_mean, shifted_sigma = moments(dz=0.05)
+    assert np.isclose(shifted_mean, mean + 0.05)
+    assert np.isclose(shifted_sigma, sigma)
+
+
+def test_mag_bias_is_central_and_reused() -> None:
+    """The counts are differentiated symmetrically about the cut, and once."""
+    tbin = TomographicBin("u", 24.5, 24.5, f_interlopers=0.1)
+    assert tbin.dm_mag_bias == 0.01
+
+    # Computed lazily, then kept: each side of the difference costs a whole bin.
+    assert tbin._mag_bias is None
+    alpha = tbin.mag_bias
+    assert tbin._mag_bias == alpha
+    assert tbin.mag_bias == alpha
+
+    # A central difference is second-order accurate, so quadrupling the step
+    # barely moves the answer. A one-sided difference would shift by ~2e-2 here.
+    coarse = TomographicBin("u", 24.5, 24.5, f_interlopers=0.1, dm_mag_bias=0.04)
+    assert np.isclose(coarse.mag_bias, alpha, atol=1e-3)
+    assert not np.isclose(coarse.mag_bias, alpha, atol=1e-12)
+
+
+def test_scalar_selection_required() -> None:
+    """One bin describes one selection, so arrays are refused clearly."""
+    with pytest.raises(TypeError, match="mag_cut must be a scalar"):
+        TomographicBin("u", np.array([24.5, 25.0]))  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="m5_det must be a scalar"):
+        TomographicBin("u", 24.5, np.array([24.5, 25.0]))  # type: ignore[arg-type]

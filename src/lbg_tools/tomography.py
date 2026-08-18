@@ -58,6 +58,45 @@ def _truncate_at_zero(
     )
 
 
+def _stretch_about_mean(
+    z: np.ndarray,
+    nz: np.ndarray,
+    stretch: float,
+) -> np.ndarray:
+    """Scale the width of a distribution without moving its mean.
+
+    The pivot is the number-weighted mean of the distribution, not the midpoint
+    of the grid it happens to be sampled on. Pivoting on the grid instead
+    couples the width to the mean: for an LSST-like u-dropout sample the two
+    differ by 0.047 in redshift, so a ten per cent stretch also shifted the mean
+    by 0.005 -- larger than the shift uncertainty such a sample is usually
+    assigned, which makes the width and shift parameters degenerate for a reason
+    that is arithmetic rather than physical.
+
+    Parameters
+    ----------
+    z : np.ndarray
+        Redshift grid, increasing.
+    nz : np.ndarray
+        Number density per unit redshift on that grid, used as the weight.
+    stretch : float
+        Factor by which to scale the width.
+
+    Returns
+    -------
+    np.ndarray
+        The stretched grid. The distribution keeps its mean and its integral,
+        and its standard deviation is scaled by exactly ``stretch``.
+    """
+    # An unpopulated grid has no weighted mean to pivot on, which is the case
+    # for the interlopers when there are none; the midpoint will do there, since
+    # nothing is weighted by it either way.
+    weight = simpson(nz, x=z)
+    pivot = simpson(z * nz, x=z) / weight if weight > 0 else z.mean()
+
+    return stretch * (z - pivot) + pivot
+
+
 def lbg_bias(mag_cut: float, z: float | np.ndarray) -> np.ndarray:
     """Linear bias of a Lyman-break sample limited at an apparent magnitude.
 
@@ -129,6 +168,7 @@ class TomographicBin:
         dz_interlopers: float = 0.0,
         stretch_interlopers: float = 1.0,
         b_interlopers: float = 1.5,
+        dm_mag_bias: float = 0.01,
         lf_params: dict | None = None,
         completeness_params: dict | None = None,
         cosmology: "Cosmology | ccl.Cosmology" = Planck18,
@@ -168,6 +208,9 @@ class TomographicBin:
             interloper population is a mix of galaxy types that the Lyman-break
             bias relation does not describe. The default, 1.5, is typical of the
             low-redshift lens samples interlopers resemble.
+        dm_mag_bias : float, optional
+            Magnitude step used to differentiate the number counts when
+            evaluating :attr:`mag_bias`. The default is 0.01.
         lf_params : dict or None, optional
             Parameters to pass to luminosity function creation.
             The default is None (i.e. default Luminosity Function used).
@@ -183,6 +226,21 @@ class TomographicBin:
         # Set m5_det
         m5_det = mag_cut if m5_det is None else m5_det
 
+        # A bin describes one selection. The redshift grid comes from the
+        # completeness table and the magnitude grid from the cut, so an array of
+        # cuts or depths would have to carry an extra axis through the
+        # luminosity function, the completeness and the integrals below. Rather
+        # than half-support that, say so: building one bin per depth is cheap,
+        # because the expensive part is the completeness table and that is
+        # shared between bins of the same band.
+        for name, arg in (("mag_cut", mag_cut), ("m5_det", m5_det)):
+            if np.ndim(arg) != 0:
+                raise TypeError(
+                    f"{name} must be a scalar, not an array. To scan a grid, "
+                    "build one TomographicBin per grid point: the completeness "
+                    "table is loaded once per band and shared."
+                )
+
         # Save params
         self._band = band
         self._mag_cut = mag_cut
@@ -193,6 +251,10 @@ class TomographicBin:
         self._dz_interlopers = dz_interlopers
         self._stretch_interlopers = stretch_interlopers
         self._b_interlopers = b_interlopers
+        self._dm_mag_bias = dm_mag_bias
+
+        # Filled in on first access; see the mag_bias property
+        self._mag_bias: float | None = None
 
         # Check and save cosmology
         check_cosmology(cosmology)
@@ -258,6 +320,11 @@ class TomographicBin:
         """Linear galaxy bias of the interlopers"""
         return self._b_interlopers
 
+    @property
+    def dm_mag_bias(self) -> float:
+        """Magnitude step used to differentiate the counts for mag_bias"""
+        return self._dm_mag_bias
+
     def _calc_nz(self) -> None:
         """Perform n(z) calculation to set everything up.
 
@@ -316,20 +383,31 @@ class TomographicBin:
         z_lbg += self.dz
         z_interlopers += self.dz_interlopers
 
-        # Stretch distributions
-        z_lbg = self.stretch * (z_lbg - z_lbg.mean()) + z_lbg.mean()
-        z_interlopers = (
-            self.stretch_interlopers * (z_interlopers - z_interlopers.mean())
-            + z_interlopers.mean()
+        # Stretch distributions about their own means, so that stretch changes
+        # the width and dz changes the mean, independently
+        z_lbg = _stretch_about_mean(z_lbg, nz_lbg, self.stretch)
+        z_interlopers = _stretch_about_mean(
+            z_interlopers, nz_interlopers, self.stretch_interlopers
         )
 
         # Cut the interloper distribution off at zero redshift
         z_interlopers, nz_interlopers = _truncate_at_zero(z_interlopers, nz_interlopers)
 
-        # Re-normalize distributions. A shift large enough to push the whole
-        # interloper distribution below zero leaves nothing to normalize.
+        # Re-normalize distributions. The number of galaxies that pass the
+        # selection is an observable: dz and stretch express uncertainty in
+        # where those galaxies sit in redshift, not in how many there are. So
+        # truncating at zero redistributes the interlopers rather than
+        # discarding them, and the totals below are the pre-truncation ones.
         nz_lbg *= N_lbg / simpson(nz_lbg, x=z_lbg)
-        if self.f_interlopers > 0 and z_interlopers.size > 1:
+        if self.f_interlopers > 0:
+            if z_interlopers.size < 2:
+                raise ValueError(
+                    f"dz_interlopers={self.dz_interlopers} and "
+                    f"stretch_interlopers={self.stretch_interlopers} push the "
+                    "whole interloper distribution below zero redshift, leaving "
+                    "no support to hold the interlopers the selection admits. "
+                    "The model cannot represent that; use a smaller shift."
+                )
             nz_interlopers *= N_interlopers / simpson(nz_interlopers, x=z_interlopers)
 
         # Combine true and interloper distributions
@@ -428,10 +506,8 @@ class TomographicBin:
             Normalized redshift distribution
         """
         z, nz = self.nz
-        n = np.atleast_1d(self.number_density)
-        pz = nz / n[:, None]
 
-        return z, pz.squeeze()
+        return z, nz / self.number_density
 
     @property
     def g_bias(self) -> tuple[np.ndarray, np.ndarray]:
@@ -461,16 +537,24 @@ class TomographicBin:
 
         return z, b
 
-    @property
-    def mag_bias(self) -> float:
-        """Magnification bias alpha coefficient
+    def _shifted(self, dm: float) -> "TomographicBin":
+        """Copy this bin with every galaxy brightened by ``dm``.
 
-        Defined as 2.5 * d/dm(log number_density) at mag_cut
+        Brightening the galaxies moves the cut and the depth together: the cut
+        is fixed in apparent magnitude, so relative to brighter galaxies it sits
+        ``dm`` fainter, and their signal-to-noise improves by the same amount.
+
+        Parameters
+        ----------
+        dm : float
+            Amount by which to brighten the galaxies. Negative dims them.
+
+        Returns
+        -------
+        TomographicBin
+            An otherwise identical bin.
         """
-        # Create deeper bin
-        # This is equivalent to making all the galaxies brighter by dm
-        dm = 0.01
-        magnified_bin = TomographicBin(
+        return TomographicBin(
             band=self.band,
             mag_cut=self.mag_cut + dm,
             m5_det=self.m5_det + dm,
@@ -479,16 +563,39 @@ class TomographicBin:
             f_interlopers=self.f_interlopers,
             dz_interlopers=self.dz_interlopers,
             stretch_interlopers=self.stretch_interlopers,
+            b_interlopers=self.b_interlopers,
+            dm_mag_bias=self.dm_mag_bias,
             lf_params=self._lf_params,
             completeness_params=self._completeness_params,
             cosmology=self.cosmology,
         )
 
-        # Calculate log10 number density for original and deeper bin
-        n0 = np.log10(self.number_density)
-        n1 = np.log10(magnified_bin.number_density)
+    @property
+    def mag_bias(self) -> float:
+        """Magnification bias alpha coefficient
+
+        Defined as 2.5 * d/dm(log number_density) at mag_cut, evaluated with a
+        central difference over +/- :attr:`dm_mag_bias`. Central rather than
+        one-sided because the one-sided version returns the slope half a step
+        away from the cut rather than at it, and the extra accuracy is free
+        after the first access: each side costs a second bin, so the result is
+        computed once and kept.
+
+        Returns
+        -------
+        float
+            The magnification bias coefficient alpha.
+        """
+        if self._mag_bias is not None:
+            return self._mag_bias
+
+        dm = self.dm_mag_bias
+
+        # Number counts with the galaxies brightened and dimmed by dm
+        n_up = np.log10(self._shifted(dm).number_density)
+        n_down = np.log10(self._shifted(-dm).number_density)
 
         # Calculate alpha
-        alpha = 2.5 * (n1 - n0) / dm
+        self._mag_bias = float(2.5 * (n_up - n_down) / (2 * dm))
 
-        return alpha
+        return self._mag_bias

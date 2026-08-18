@@ -1,10 +1,93 @@
 """Class to load completeness info."""
 
+from functools import lru_cache
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 from scipy.interpolate import RegularGridInterpolator
 
 from .library import library
+
+
+@lru_cache(maxsize=None)
+def _load_tables(
+    band: str,
+    directories: tuple[Path, ...],
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Read a completeness table from disk and condition it.
+
+    Cached, because the result depends only on the band and where the data
+    directories are: the depth enters the completeness only as ``m - m5_det``,
+    so every depth shares one table. Conditioning dominates the cost of
+    building a :class:`Completeness`, which in turn dominates the cost of
+    building a :class:`~lbg_tools.TomographicBin`, so anything that scans a
+    grid of depths or magnitude cuts was paying it once per grid point.
+
+    Parameters
+    ----------
+    band : str
+        Name of dropout band.
+    directories : tuple of pathlib.Path
+        Data directories to search, as a tuple so that this is hashable and so
+        that adding a directory invalidates the cache rather than being missed.
+
+    Returns
+    -------
+    pandas.DataFrame
+        The table as read from disk.
+    pandas.DataFrame
+        The table forced monotonic in magnitude and unimodal in redshift.
+
+    Raises
+    ------
+    ValueError
+        If no table for this band exists in any data directory.
+    RuntimeError
+        If more than one does.
+
+    Notes
+    -----
+    Both frames are shared between every caller. Do not mutate them.
+    """
+    files: list[Path] = []
+    for directory in directories:
+        files.extend(list(directory.glob(f"**/completeness_{band}.dat")))
+    if len(files) == 0:
+        raise ValueError(
+            f"completeness_{band}.dat not found in any data directory.\n"
+            "Perhaps you need to run `from lbg_tools import data` and "
+            "`library.add_directory('path/to/files')` before creating the "
+            "completeness object."
+        )
+    if len(files) > 1:  # pragma: no cover
+        raise RuntimeError(
+            f"Found {len(files)} files with the name 'completeness_{band}.dat' "
+            "in the data directories, and I don't know which one to pick! "
+            "You must remove all but one of these files, or use unique "
+            "band names."
+        )
+
+    table0 = pd.read_csv(
+        files[0],
+        sep="  ",
+        header=5,
+        engine="python",
+        dtype=np.float64,
+    )
+    table0.index = table0.index.to_numpy(dtype=float)
+    table0.columns = table0.columns.to_numpy(dtype=float)
+
+    # Force completeness to be monotonic along magnitude axis
+    # and unimodal along the redshift axis. This ensures extrapolation
+    # trends towards zero. Both steps adjust their argument in place, so they
+    # get a copy: without it table0 would be the conditioned table too, which
+    # it is named and documented not to be.
+    table = Completeness._force_z_unimodality(
+        Completeness._force_mag_monotonicity(table0.copy())
+    )
+
+    return table0, table
 
 
 class Completeness:
@@ -43,41 +126,9 @@ class Completeness:
         self._m5_det = m5_det
         self.extrap_bright = extrap_bright
 
-        # Load the completeness table
-        files = []
-        for directory in library.directories:
-            files.extend(list(directory.glob(f"**/completeness_{band}.dat")))
-        if len(files) == 0:
-            raise ValueError(
-                f"completeness_{band}.dat not found in any data directory.\n"
-                "Perhaps you need to run `from lbg_tools import data` and "
-                "`library.add_directory('path/to/files')` before creating the "
-                "completeness object."
-            )
-        if len(files) > 1:  # pragma: no cover
-            raise RuntimeError(
-                f"Found {len(files)} files with the name 'completeness_{band}.dat' "
-                "in the data directories, and I don't know which one to pick! "
-                "You must remove all but one of these files, or use unique "
-                "band names."
-            )
-        else:
-            self.table0 = pd.read_csv(
-                files[0],
-                sep="  ",
-                header=5,
-                engine="python",
-                dtype=np.float64,
-            )
-            self.table0.index = self.table0.index.to_numpy(dtype=float)
-            self.table0.columns = self.table0.columns.to_numpy(dtype=float)
-
-        # Force completeness to be monotonic along magnitude axis
-        # and unimodal along the redshift axis. This ensures extrapolation
-        # trends towards zero
-        self.table = self._force_z_unimodality(
-            self._force_mag_monotonicity(self.table0)
-        )
+        # Load the completeness table. Shared between every object with this
+        # band, so do not mutate self.table0 or self.table.
+        self.table0, self.table = _load_tables(band, tuple(library.directories))
 
         # Create interpolators
         self._interpolator = RegularGridInterpolator(
@@ -160,7 +211,8 @@ class Completeness:
 
         return new_array
 
-    def _force_z_unimodality(self, table: pd.DataFrame) -> pd.DataFrame:
+    @staticmethod
+    def _force_z_unimodality(table: pd.DataFrame) -> pd.DataFrame:
         """Force completeness to be unimodal along the redshift axis.
 
         Parameters
@@ -175,7 +227,9 @@ class Completeness:
         """
         # Loop over columns
         for j in range(table.shape[1]):
-            table.iloc[:, j] = self._force_unimodality(table.iloc[:, j].to_numpy())
+            table.iloc[:, j] = Completeness._force_unimodality(
+                table.iloc[:, j].to_numpy()
+            )
 
         return table
 
