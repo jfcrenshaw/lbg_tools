@@ -4,4 +4,4 @@ from .igm import IGM
 from .library import library
 from .luminosity_function import LuminosityFunction
 from .sed import SED
-from .tomography import TomographicBin
+from .tomography import TomographicBin, lbg_bias
