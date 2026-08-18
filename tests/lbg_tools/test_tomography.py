@@ -184,3 +184,21 @@ def test_interloper_bias_is_configurable() -> None:
 
     # The Lyman-break half is unaffected and still rises with redshift.
     assert np.all(np.diff(b[n_interlopers:]) > 0)
+
+
+def test_interlopers_shifted_entirely_below_zero() -> None:
+    """A shift large enough to push every interloper below zero leaves none."""
+    tbin = TomographicBin("u", 24.5, 24.5, f_interlopers=0.2, dz_interlopers=-2)
+
+    assert tbin.z_interlopers.size == 0
+    assert tbin.nz_interlopers.size == 0
+
+    # What survives is the Lyman-break half alone, still a valid distribution.
+    z, nz = tbin.nz
+    assert np.allclose(z, tbin.z_lbg)
+    assert np.all(np.isfinite(nz))
+    assert z.min() >= 0
+
+    # The bias still evaluates on whatever grid is left.
+    _, b = tbin.g_bias
+    assert b.size == z.size
