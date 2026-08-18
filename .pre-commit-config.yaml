@@ -69,6 +69,14 @@ repos:
       - id: mypy
         name: mypy (python files in src/ and tests/)
         entry: mypy
+        # --no-incremental because mypy 2.3.1 crashes with an INTERNAL ERROR on
+        # some batches of files in CI, while type-checking the same files
+        # cleanly elsewhere. 2.3.1 moved its cache onto a new serialization
+        # backend (the ast-serialize dependency), and the cache is the one thing
+        # that differs between batches, so this sidesteps it without pinning
+        # mypy back. --show-traceback so that if it crashes again the log says
+        # where, which is what an upstream bug report would need.
+        args: [--no-incremental, --show-traceback]
         language: system
         types: [python]
         files: ^(src|tests)/
